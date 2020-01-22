@@ -73,7 +73,8 @@ namespace {
       errs() << "\n\n\tFunction Name is : " << Function_Name << "\n";
       errs() << "   **********************************************" << '\n';
 
-     
+      getInputFunction(&F);
+      gatherLoadsandStores(&F);
       getLoopsOfFunction(&F, LI, SE);
 
 
@@ -83,6 +84,8 @@ namespace {
     // Loops Identifier of a given function. (if any loops)
     //
     void getLoopsOfFunction (Function *F, LoopInfo &LI, ScalarEvolution &SE ) {
+
+      long unsigned int NumberOfInstructions = 0;
 
       for(Function::iterator BB = F->begin(), E = F->end(); BB != E; ++BB) {
 
@@ -100,9 +103,212 @@ namespace {
 
           }
         }
+
+        else { // No loops
+          for(BasicBlock::iterator BI = CurrentBlock->begin(), BE = CurrentBlock->end(); BI != BE; ++BI)
+            NumberOfInstructions++;
+        }
       } // End of for
+      errs() << "   ----------------------------------------------" << '\n';
+      errs() << " Number of Instructions (Loops Excluded) : " << NumberOfInstructions << "\n";
+      errs() << "   ----------------------------------------------" << '\n';
+    }
+
+  // START 
+  // IMPORT FROM ACCELSEEKER FUNCTIONS
+  //
+  //
+  bool structNameIsValid(llvm::Type *type) {
+
+    if (type->getStructName() == "struct._IO_marker")
+      return 0;
+    if (type->getStructName() == "struct._IO_FILE")
+      return 0;
+
+
+    return 1;
+  }
+
+  // Gather the data of the Array type.
+  //
+  long int getTypeArrayData(llvm::Type *type) {
+
+    long int array_data=0;
+    int TotalNumberOfArrayElements = 1;
+
+    while (type->isArrayTy()) {
+
+      llvm::Type *array_type    = type->getArrayElementType();
+      int NumberOfArrayElements     = type->getArrayNumElements();
+      int SizeOfElement           = array_type->getPrimitiveSizeInBits();
+
+     errs() << "\n\t Array " << *array_type << " "  << NumberOfArrayElements<< " " << SizeOfElement  << " \n ";
+
+      TotalNumberOfArrayElements *= NumberOfArrayElements;
+
+      if (SizeOfElement) {
+        array_data = TotalNumberOfArrayElements * SizeOfElement;
+        return array_data ;
+      }
+      else
+        type = array_type;
+    }
+    return array_data;  
+  }
+
+  long int getTypeData(llvm::Type *type){
+
+    long int arg_data =0;
+
+    if ( type->isPointerTy()){
+      errs() << "\n\t Pointer Type!  " << " \n --------\n";
+
+
+      llvm::Type *Pointer_Type = type->getPointerElementType();
+      arg_data+=getTypeData(Pointer_Type);
+    }
+
+    // Struct Case
+    else if ( type->isStructTy()) {
+
+      long int struct_data=0;
+      unsigned int NumberOfElements = type->getStructNumElements();
+
+      for (int i=0; i<NumberOfElements; i++){
+
+        llvm::Type *element_type = type->getStructElementType(i);
+        errs() << "\n\t Struct -- Arg: " << i << " " << *element_type << " "
+            << type->getStructName() << " \n ";
+
+        if (structNameIsValid(type))
+          struct_data +=  getTypeData(element_type);
+  
+      }
+      arg_data = struct_data;
+      //return arg_data;    
+    }
+
+    // Scalar Case
+    else if ( type->getPrimitiveSizeInBits()) {
+      //errs() << "\n\t Primitive Size  " <<  type->getPrimitiveSizeInBits()  << " \n ";
+      arg_data = type->getPrimitiveSizeInBits();
+      //return arg_data;
 
     }
+ 
+    // Vector Case
+    else if ( type->isVectorTy()) {
+      //errs() << "\n\t Vector  " <<  type->getPrimitiveSizeInBits()  << " \n ";
+      arg_data = type->getPrimitiveSizeInBits();
+      //return arg_data;
+    }
+
+
+    // Array Case
+    else if(type->isArrayTy()) {
+      arg_data = getTypeArrayData(type);
+      //errs() << "\n\t Array Data " << arg_data << " \n ";
+      //return arg_data;
+    }
+
+    return arg_data;
+  }
+
+    // Input from parameter List.
+    //
+    //
+    long int getInputFunction(Function *F) {
+      long  int InputData = 0; // Bits
+      long int InputDataBytes = 0; // Bytes
+
+      int arg_index=0;
+
+      Function::ArgumentListType & Arg_List = F->getArgumentList();
+
+      for (Function::arg_iterator AB = Arg_List.begin(), AE = Arg_List.end(); AB != AE; ++AB){
+
+        llvm::Argument *Arg = &*AB;
+        llvm::Type *Arg_Type = Arg->getType();
+
+
+
+
+        errs() << "\n\n Argument : " << arg_index << "  --->  " << *AB << " -- " << *Arg_Type  << " --  \n ";
+
+        long int InputDataOfArg = getTypeData(Arg_Type);
+        errs() << "\n\n Argument : " << arg_index << "  -- Input Data --  " << InputDataOfArg<< " \n "; 
+
+        InputData += InputDataOfArg;
+        arg_index++;
+
+       }
+
+       errs() << "\n\n Total Input Data Bits :  " << InputData << " \n ";
+       InputDataBytes = InputData/8; 
+       errs() << "\n\n Total Input Data Bytes :  " << InputDataBytes << " \n ";
+
+      return InputDataBytes;
+    }
+
+    // Gather Stores and Loads from Functions
+    //
+    //
+    void gatherLoadsandStores(Function *F) {
+      long unsigned int NumberOfInstructions = 0;
+
+      // BlockFrequencyInfo *BFI = &getAnalysis<BlockFrequencyInfoWrapperPass>().getBFI(); 
+
+
+      for(Function::iterator BB = F->begin(), E = F->end(); BB != E; ++BB) {
+        BasicBlock *CurrentBlock = &*BB;
+
+        // float BBFreqFloat = static_cast<float>(static_cast<float>(BFI->getBlockFreq(CurrentBlock).getFrequency()) / static_cast<float>(BFI->getEntryFreq()));
+        // int EntryFuncFreq = getEntryCount(F);
+        // float BBFreq = BBFreqFloat * static_cast<float>(EntryFuncFreq);
+
+        errs() << " BB Name :  " << CurrentBlock->getName() << " \n ";
+        // errs() << " Entry Freq :  " << EntryFuncFreq << " \n ";
+        // errs() << " BB Freq :  " << BBFreqFloat << " \n ";
+        // errs() << " BB Total Freq :  " << BBFreq << " \n ";
+
+        // Iterate inside the basic block.
+        for(BasicBlock::iterator BI = CurrentBlock->begin(), BE = CurrentBlock->end(); BI != BE; ++BI) {
+
+          // Load Info
+          if(LoadInst *Load = dyn_cast<LoadInst>(&*BI)) {
+
+            llvm::Type *LoadType = Load->getType();
+            // llvm::Type *Ptr_LoadType = NULL;
+
+            if ( LoadType->isPointerTy()) {
+              llvm::Type *Ptr_LoadType = LoadType->getPointerElementType();
+
+               if (Ptr_LoadType->isStructTy() || Ptr_LoadType->isArrayTy() || Ptr_LoadType->isVectorTy()) {
+                  errs() << "\t" << *Load << "\t"  << *Load->getType() << "\t\t" << "\n";
+                  getTypeData(LoadType);
+                }
+            }
+
+            //errs() << "\t" << *Load << "\t"  << *Load->getType() << "\t\t" << "\n";
+
+           
+              // errs() << "\t" << *Load << "\t"  << *Load->getType() << "\t\t" << getTypeData(LoadType) << "\n";
+
+          }
+
+            //int InputLoad = Load->getType()->getPrimitiveSizeInBits();
+          NumberOfInstructions++;
+        } // End of BB For
+      } // End of Function For
+      errs() << "   ----------------------------------------------" << '\n';
+      errs() << " Number of Instructions : " << NumberOfInstructions << "\n";
+      errs() << "   ----------------------------------------------" << '\n';
+    }
+          
+
+    // END 
+    // IMPORT FROM ACCELSEEKER FUNCTIONS
+
 
 
     virtual void getAnalysisUsage(AnalysisUsage& AU) const override {
